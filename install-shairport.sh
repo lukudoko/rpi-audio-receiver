@@ -2,7 +2,7 @@
 
 if [[ $(id -u) -ne 0 ]] ; then echo "Please run as root" ; exit 1 ; fi
 
-: "${SHAIRPORT_VERSION:=4.2}"
+: "${SHAIRPORT_VERSION:=4.3.2}"
 
 echo
 echo -n "Do you want to install Shairport Sync AirPlay 2 Audio Receiver (shairport-sync v${SHAIRPORT_VERSION})? [y/N] "
@@ -25,7 +25,7 @@ rm -rf alac
 # NQPTP
 git clone https://github.com/mikebrady/nqptp.git
 cd nqptp
-git checkout 1.2.1
+git checkout 1.2.4
 autoreconf -fi
 ./configure --with-systemd-startup
 make -j $(nproc)
@@ -36,9 +36,9 @@ rm -rf nqptp
 # Shairport Sync
 git clone https://github.com/mikebrady/shairport-sync.git
 cd shairport-sync
-git checkout 4.2
+git checkout 4.3.2
 autoreconf -fi
-./configure --sysconfdir=/etc --with-mqtt-client --with-metadata --with-alsa --with-pa --with-soxr --with-avahi --with-ssl=openssl --with-systemd --with-airplay-2 --with-apple-alac
+./configure --sysconfdir=/etc --with-mqtt-client --with-metadata --with-alsa --with-pa --with-soxr --with-avahi --with-ssl=openssl --with-airplay-2 --with-apple-alac
 make -j $(nproc)
 make install
 cd ..
@@ -61,4 +61,7 @@ sessioncontrol = {
 EOF
 
 systemctl enable --now nqptp
-systemctl enable --now shairport-sync
+
+pm2 startup
+pm2 start shairport-sync
+pm2 save

@@ -83,5 +83,4 @@ EOF
 
 systemctl enable --now nqptp
 
-pm2 start shairport-sync
-pm2 save
+

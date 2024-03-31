@@ -58,10 +58,30 @@ general = {
 sessioncontrol = {
   session_timeout = 20;
 };
+
+metadata =
+{
+        enabled = "yes"; // set this to yes to get Shairport Sync to solicit metadata from the source and to pass it on via a pipe
+        include_cover_art = "yes"; // set to "yes" to get Shairport Sync to solicit cover art from the source and pass it via the pipe. You must also set "enabled" to "yes".
+        cover_art_cache_directory = "/tmp/shairport-sync/.cache/coverart"; // artwork will be  stored in this directory if the dbus or MPRIS interfaces are enabled or if the MQTT client is>
+        pipe_name = "/tmp/shairport-sync-metadata";
+        pipe_timeout = 5000; // wait for this number of milliseconds for a blocked pipe to unblock before giving up
+};
+
+mqtt =
+{
+        enabled = "yes"; // set this to yes to enable the mqtt-metadata-service
+        hostname = "192.168.3.41"; // Hostname of the MQTT Broker
+        port = 1883; // Port on the MQTT Broker to connect to
+        topic = "shairport"; //MQTT topic where this instance of shairport-sync should publish. If not set, the general.name value is used.
+//      publish_raw = "no"; //whether to publish all available metadata under the codes given in the 'metadata' docs.
+        publish_parsed = "yes"; //whether to publish a small (but useful) subset of metadata under human-understandable topics
+        publish_cover = "yes"; //whether to publish the cover over mqtt in binary form. This may lead to a bit of load on the broker
+        enable_remote = "yes"; //whether to remote control via MQTT. RC is available under `topic`/remote.
+};
 EOF
 
 systemctl enable --now nqptp
 
-pm2 startup
 pm2 start shairport-sync
 pm2 save

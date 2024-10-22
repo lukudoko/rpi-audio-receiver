@@ -3,7 +3,7 @@
 set -e
 
 NQPTP_VERSION="1.2.4"
-SHAIRPORT_SYNC_VERSION="4.3.2"
+SHAIRPORT_SYNC_VERSION="4.3.4"
 TMP_DIR=""
 
 cleanup() {
@@ -22,7 +22,7 @@ verify_os() {
 
     . /etc/os-release
 
-    if [ "$ID" != "debian" && "$ID" != "raspbian" ] || [ "$VERSION_ID" != "12" ]; then
+    if [ "$ID" != "debian" && "$ID" != "raspbian" ] || [ "$VERSION_ID" != "11" ]; then
         echo $MSG
         exit 1
     fi
@@ -39,72 +39,6 @@ set_hostname() {
     sudo hostnamectl set-hostname --pretty "$PRETTY_HOSTNAME"
 }
 
-install_bluetooth() {
-    read -p "Do you want to install Bluetooth Audio (ALSA)? [y/N] " REPLY
-    if [[ ! "$REPLY" =~ ^(yes|y|Y)$ ]]; then return; fi
-
-    # Bluetooth Audio ALSA Backend (bluez-alsa-utils)
-    sudo apt update
-    sudo apt install -y --no-install-recommends bluez-tools bluez-alsa-utils
-
-    # Bluetooth settings
-    sudo tee /etc/bluetooth/main.conf >/dev/null <<'EOF'
-[General]
-Class = 0x200414
-DiscoverableTimeout = 0
-
-[Policy]
-AutoEnable=true
-EOF
-
-    # Bluetooth Agent
-    sudo tee /etc/systemd/system/bt-agent@.service >/dev/null <<'EOF'
-[Unit]
-Description=Bluetooth Agent
-Requires=bluetooth.service
-After=bluetooth.service
-
-[Service]
-ExecStartPre=/usr/bin/bluetoothctl discoverable on
-ExecStartPre=/bin/hciconfig %I piscan
-ExecStartPre=/bin/hciconfig %I sspmode 1
-ExecStart=/usr/bin/bt-agent --capability=NoInputNoOutput
-RestartSec=5
-Restart=always
-KillSignal=SIGUSR1
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    sudo systemctl daemon-reload
-    sudo systemctl enable bt-agent@hci0.service
-
-    # Bluetooth udev script
-    sudo tee /usr/local/bin/bluetooth-udev >/dev/null <<'EOF'
-#!/bin/bash
-if [[ ! $NAME =~ ^\"([0-9A-F]{2}[:-]){5}([0-9A-F]{2})\"$ ]]; then exit 0; fi
-
-action=$(expr "$ACTION" : "\([a-zA-Z]\+\).*")
-
-if [ "$action" = "add" ]; then
-    bluetoothctl discoverable off
-    # disconnect wifi to prevent dropouts
-    #ifconfig wlan0 down &
-fi
-
-if [ "$action" = "remove" ]; then
-    # reenable wifi
-    #ifconfig wlan0 up &
-    bluetoothctl discoverable on
-fi
-EOF
-    sudo chmod 755 /usr/local/bin/bluetooth-udev
-
-    sudo tee /etc/udev/rules.d/99-bluetooth-udev.rules >/dev/null <<'EOF'
-SUBSYSTEM=="input", GROUP="input", MODE="0660"
-KERNEL=="input[0-9]*", RUN+="/usr/local/bin/bluetooth-udev"
-EOF
-}
 
 install_shairport() {
     read -p "Do you want to install Shairport Sync (AirPlay 2 audio player)? [y/N] " REPLY
@@ -147,7 +81,7 @@ install_shairport() {
     unzip shairport-sync-${SHAIRPORT_SYNC_VERSION}.zip
     cd shairport-sync-${SHAIRPORT_SYNC_VERSION}
     autoreconf -fi
-    ./configure --sysconfdir=/etc --with-alsa --with-soxr --with-avahi --with-ssl=openssl --with-systemd --with-airplay-2 --with-apple-alac
+    ./configure --sysconfdir=/etc --with-alsa --with-soxr --with-mqtt-client --with-metadata --with-avahi --with-ssl=openssl --with-systemd --with-airplay-2 --with-apple-alac
     make -j $(nproc)
     sudo make install
     cd ..
@@ -162,6 +96,28 @@ general = {
 
 sessioncontrol = {
   session_timeout = 20;
+};
+
+
+metadata =
+{
+        enabled = "yes"; // set this to yes to get Shairport Sync to solicit metadata from the source and to pass it on via a pipe
+        include_cover_art = "yes"; // set to "yes" to get Shairport Sync to solicit cover art from the source and pass it via the pipe. You must also set "enabled" to "yes".
+        cover_art_cache_directory = "/tmp/shairport-sync/.cache/coverart"; // artwork will be  stored in this directory if the dbus or MPRIS interfaces are enabled or if the MQTT client is>
+        pipe_name = "/tmp/shairport-sync-metadata";
+        pipe_timeout = 5000; // wait for this number of milliseconds for a blocked pipe to unblock before giving up
+};
+
+mqtt =
+{
+        enabled = "yes"; // set this to yes to enable the mqtt-metadata-service
+        hostname = "192.168.3.41"; // Hostname of the MQTT Broker
+        port = 1883; // Port on the MQTT Broker to connect to
+        topic = "shairport"; //MQTT topic where this instance of shairport-sync should publish. If not set, the general.name value is used.
+//      publish_raw = "no"; //whether to publish all available metadata under the codes given in the 'metadata' docs.
+        publish_parsed = "yes"; //whether to publish a small (but useful) subset of metadata under human-understandable topics
+        publish_cover = "yes"; //whether to publish the cover over mqtt in binary form. This may lead to a bit of load on the broker
+        enable_remote = "yes"; //whether to remote control via MQTT. RC is available under `topic`/remote.
 };
 EOF
 
@@ -190,7 +146,7 @@ LIBRESPOT_ENABLE_VOLUME_NORMALISATION=
 LIBRESPOT_NAME="${LIBRESPOT_NAME}"
 LIBRESPOT_DEVICE_TYPE="avr"
 LIBRESPOT_BITRATE="320"
-LIBRESPOT_INITIAL_VOLUME="100"
+LIBRESPOT_INITIAL_VOLUME="30"
 EOF
 
     sudo systemctl daemon-reload

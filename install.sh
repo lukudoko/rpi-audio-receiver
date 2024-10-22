@@ -159,6 +159,5 @@ echo "Raspberry Pi Audio Receiver"
 
 verify_os
 set_hostname
-install_bluetooth
 install_shairport
 install_raspotify

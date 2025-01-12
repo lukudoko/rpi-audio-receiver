@@ -164,13 +164,6 @@ install_raspotify() {
     LIBRESPOT_NAME=${LIBRESPOT_NAME:-$(hostname)}
 
     sudo tee /etc/raspotify/conf >/dev/null <<EOF
-
-
-    LIBRESPOT_QUIET=
-LIBRESPOT_AUTOPLAY=
-LIBRESPOT_DISABLE_AUDIO_CACHE=
-LIBRESPOT_DISABLE_CREDENTIAL_CACHE=
-LIBRESPOT_ENABLE_VOLUME_NORMALISATION=
 LIBRESPOT_NAME="${LIBRESPOT_NAME}"
 LIBRESPOT_DEVICE_TYPE="avr"
 LIBRESPOT_BITRATE="320"
@@ -183,13 +176,37 @@ EOF
     echo "Raspotify installed and enabled."
 }
 
-setup_cronjob() {
-    echo "Setting up cron job to restart Shairport Sync every Sunday at 4 AM..."
+setup_timer() {
+    echo "Setting up systemd timer to restart Shairport Sync every Sunday at 4 AM..."
 
-    CRONJOB="0 4 * * 0 /bin/systemctl restart shairport-sync"
-    (crontab -l 2>/dev/null || true; echo "$CRONJOB") | sort -u | crontab -
+    # Create systemd timer unit
+    sudo tee /etc/systemd/system/shairport-sync-restart.timer >/dev/null <<EOF
+[Unit]
+Description=Restart Shairport Sync Weekly
 
-    echo "Cron job added."
+[Timer]
+OnCalendar=Sun 04:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    # Create corresponding service unit
+    sudo tee /etc/systemd/system/shairport-sync-restart.service >/dev/null <<EOF
+[Unit]
+Description=Restart Shairport Sync Service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart shairport-sync
+EOF
+
+    # Enable and start the timer
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now shairport-sync-restart.timer
+
+    echo "Systemd timer enabled."
 }
 
 trap cleanup EXIT
@@ -201,4 +218,4 @@ remove_previous_versions
 set_hostname
 install_shairport
 install_raspotify
-setup_cronjob
+setup_timer

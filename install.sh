@@ -3,13 +3,41 @@
 set -e
 
 NQPTP_VERSION="1.2.4"
-SHAIRPORT_SYNC_VERSION="4.3.4"
+SHAIRPORT_SYNC_VERSION="4.3.5"
 TMP_DIR=""
 
 cleanup() {
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
     fi
+}
+
+remove_previous_versions() {
+    echo "Removing previous versions of Shairport Sync and NQPTP..."
+
+    # Disable services if they exist
+    if systemctl is-enabled --quiet shairport-sync; then
+        echo "Disabling Shairport Sync..."
+        sudo systemctl disable --now shairport-sync || true
+    fi
+
+    if systemctl is-enabled --quiet nqptp; then
+        echo "Disabling NQPTP..."
+        sudo systemctl disable --now nqptp || true
+    fi
+
+    # Find and remove binaries
+    for app in shairport-sync nqptp; do
+        BIN_PATH=$(which "$app" || true)
+        if [[ -n "$BIN_PATH" ]]; then
+            echo "Removing $app at $BIN_PATH..."
+            sudo rm -f "$BIN_PATH"
+        else
+            echo "$app binary not found. Skipping removal."
+        fi
+    done
+
+    echo "Previous versions removed."
 }
 
 verify_os() {
@@ -38,7 +66,6 @@ set_hostname() {
     PRETTY_HOSTNAME="${PRETTY_HOSTNAME:-${CURRENT_PRETTY_HOSTNAME:-Raspberry Pi}}"
     sudo hostnamectl set-hostname --pretty "$PRETTY_HOSTNAME"
 }
-
 
 install_shairport() {
     read -p "Do you want to install Shairport Sync (AirPlay 2 audio player)? [y/N] " REPLY
@@ -98,39 +125,38 @@ sessioncontrol = {
   session_timeout = 20;
 };
 
-
 metadata =
 {
-        enabled = "yes"; // set this to yes to get Shairport Sync to solicit metadata from the source and to pass it on via a pipe
-        include_cover_art = "yes"; // set to "yes" to get Shairport Sync to solicit cover art from the source and pass it via the pipe. You must also set "enabled" to "yes".
-        cover_art_cache_directory = "/tmp/shairport-sync/.cache/coverart"; // artwork will be  stored in this directory if the dbus or MPRIS interfaces are enabled or if the MQTT client is>
+        enabled = "yes";
+        include_cover_art = "yes";
+        cover_art_cache_directory = "/tmp/shairport-sync/.cache/coverart";
         pipe_name = "/tmp/shairport-sync-metadata";
-        pipe_timeout = 5000; // wait for this number of milliseconds for a blocked pipe to unblock before giving up
+        pipe_timeout = 5000;
 };
 
 mqtt =
 {
-        enabled = "yes"; // set this to yes to enable the mqtt-metadata-service
-        hostname = "192.168.3.41"; // Hostname of the MQTT Broker
-        port = 1883; // Port on the MQTT Broker to connect to
-        topic = "shairport"; //MQTT topic where this instance of shairport-sync should publish. If not set, the general.name value is used.
-//      publish_raw = "no"; //whether to publish all available metadata under the codes given in the 'metadata' docs.
-        publish_parsed = "yes"; //whether to publish a small (but useful) subset of metadata under human-understandable topics
-        publish_cover = "yes"; //whether to publish the cover over mqtt in binary form. This may lead to a bit of load on the broker
-        enable_remote = "yes"; //whether to remote control via MQTT. RC is available under `topic`/remote.
+        enabled = "yes";
+        hostname = "192.168.3.41";
+        port = 1883;
+        topic = "shairport";
+        publish_parsed = "yes";
+        publish_cover = "yes";
+        enable_remote = "yes";
 };
 EOF
 
     sudo usermod -a -G gpio shairport-sync
     sudo systemctl enable --now nqptp
     sudo systemctl enable --now shairport-sync
+
+    echo "Shairport Sync installed and enabled."
 }
 
 install_raspotify() {
     read -p "Do you want to install Raspotify (Spotify Connect)? [y/N] " REPLY
     if [[ ! "$REPLY" =~ ^(yes|y|Y)$ ]]; then return; fi
 
-    # Install Raspotify
     curl -sL https://dtcooper.github.io/raspotify/install.sh | sh
 
     # Configure Raspotify
@@ -138,7 +164,9 @@ install_raspotify() {
     LIBRESPOT_NAME=${LIBRESPOT_NAME:-$(hostname)}
 
     sudo tee /etc/raspotify/conf >/dev/null <<EOF
-LIBRESPOT_QUIET=
+
+
+    LIBRESPOT_QUIET=
 LIBRESPOT_AUTOPLAY=
 LIBRESPOT_DISABLE_AUDIO_CACHE=
 LIBRESPOT_DISABLE_CREDENTIAL_CACHE=
@@ -150,7 +178,18 @@ LIBRESPOT_INITIAL_VOLUME="30"
 EOF
 
     sudo systemctl daemon-reload
-    sudo systemctl enable raspotify
+    sudo systemctl enable --now raspotify
+
+    echo "Raspotify installed and enabled."
+}
+
+setup_cronjob() {
+    echo "Setting up cron job to restart Shairport Sync every Sunday at 4 AM..."
+
+    CRONJOB="0 4 * * 0 /bin/systemctl restart shairport-sync"
+    (crontab -l 2>/dev/null || true; echo "$CRONJOB") | sort -u | crontab -
+
+    echo "Cron job added."
 }
 
 trap cleanup EXIT
@@ -158,6 +197,8 @@ trap cleanup EXIT
 echo "Raspberry Pi Audio Receiver"
 
 verify_os
+remove_previous_versions
 set_hostname
 install_shairport
 install_raspotify
+setup_cronjob
